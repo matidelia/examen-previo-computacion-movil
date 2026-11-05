@@ -83,7 +83,6 @@ function ThresholdModal({
 }) {
   const [value, setValue] = useState('');
 
-  // Cada vez que se abre para un equipo distinto, arranca con su valor actual.
   React.useEffect(() => {
     if (target) setValue(String(target.maxTemp));
   }, [target?.id]);

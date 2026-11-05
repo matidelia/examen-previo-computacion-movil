@@ -75,8 +75,5 @@
 
 ## Uso de IA (opcional)
 
-- Herramienta utilizada: Claude (asistente de código).
-- Qué acepté, revisé o corregí: revisé cada archivo original antes de modificarlo,
-  entiendo por qué cada cambio resuelve lo pedido (persistencia con placeholders,
-  separación de responsabilidades en el hook) y puedo explicar cualquier línea si se
-  solicita una demostración.
+- Herramienta utilizada:
+- Qué acepté, revisé o corregí:

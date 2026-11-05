@@ -7,9 +7,6 @@ import { simulateCycle, syncReference } from '../data/plantRepository';
 const MIN_THRESHOLD = 0;
 const MAX_THRESHOLD = 150;
 
-// Antes este mismo patrón (catch -> String(error) -> setNotice) estaba repetido
-// 4 veces en este archivo, con mensajes crudos del error mostrados tal cual al
-// usuario. Se centraliza acá: un solo lugar para decidir cómo se ve un error.
 function describeError(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return `${fallback}: ${error.message}`;
   return fallback;
@@ -24,11 +21,9 @@ export function usePlantViewModel() {
   const [humidity, setHumidity] = useState<number | null>(null);
   const [vibration, setVibration] = useState<number | null>(null);
 
-  // Equipo seleccionado para editar su umbral (null = diálogo cerrado)
   const [thresholdTarget, setThresholdTarget] = useState<Equipment | null>(null);
   const [thresholdError, setThresholdError] = useState<string | null>(null);
 
-  // Equipo seleccionado para ver su historial (null = diálogo cerrado)
   const [historyTarget, setHistoryTarget] = useState<Equipment | null>(null);
   const [historyRows, setHistoryRows] = useState<Reading[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -136,8 +131,6 @@ export function usePlantViewModel() {
     }
   };
 
-  // --- Umbral editable (Actividad 1) ---
-
   const openThreshold = (equipment: Equipment) => {
     setThresholdError(null);
     setThresholdTarget(equipment);
@@ -165,8 +158,6 @@ export function usePlantViewModel() {
       setThresholdError(describeError(error, 'No se pudo guardar el nuevo límite'));
     }
   };
-
-  // --- Historial de lecturas (Actividad 2) ---
 
   const openHistory = async (equipment: Equipment) => {
     setHistoryTarget(equipment);

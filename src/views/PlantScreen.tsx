@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
+  Modal,
   Pressable,
   ScrollView,
   StatusBar,
@@ -25,9 +25,17 @@ function round(v: number): string {
   return `${v.toFixed(1)} °C`;
 }
 
-function EquipmentCard({ item, onToggle }: {
+function formatDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'medium' });
+}
+
+function EquipmentCard({ item, onToggle, onThreshold, onHistory }: {
   item: Equipment;
   onToggle: (id: string, enabled: boolean) => void;
+  onThreshold: (item: Equipment) => void;
+  onHistory: (item: Equipment) => void;
 }) {
   const alarm = item.enabled === 1 && item.temperature >= item.maxTemp;
   return (
@@ -56,12 +64,95 @@ function EquipmentCard({ item, onToggle }: {
             {alarm ? '● ALARMA' : item.enabled ? '● OPERATIVO' : '○ DETENIDO'}
           </Text>
         </View>
-        <Pressable onPress={() => Alert.alert('Configuración', 'A implementar en el examen.')}
+        <Pressable onPress={() => onThreshold(item)}
           style={styles.inlineButton}><Text style={styles.inlineButtonText}>Umbral</Text></Pressable>
-        <Pressable onPress={() => Alert.alert('Historial', 'A implementar en el examen.')}
+        <Pressable onPress={() => onHistory(item)}
           style={styles.inlineButton}><Text style={styles.inlineButtonText}>Historial</Text></Pressable>
       </View>
     </View>
+  );
+}
+
+function ThresholdModal({
+  target, error, onSave, onClose,
+}: {
+  target: Equipment | null;
+  error: string | null;
+  onSave: (value: string) => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState('');
+
+  // Cada vez que se abre para un equipo distinto, arranca con su valor actual.
+  React.useEffect(() => {
+    if (target) setValue(String(target.maxTemp));
+  }, [target?.id]);
+
+  return (
+    <Modal visible={!!target} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={modalStyles.overlay}>
+        <View style={modalStyles.card}>
+          <Text style={modalStyles.title}>Umbral de {target?.id}</Text>
+          <Text style={modalStyles.subtitle}>{target?.name}</Text>
+          <TextInput
+            style={modalStyles.input}
+            value={value}
+            onChangeText={setValue}
+            keyboardType="numeric"
+            placeholder="Nuevo límite en °C (0 a 150)"
+          />
+          {error ? <Text style={modalStyles.error}>{error}</Text> : null}
+          <View style={modalStyles.actions}>
+            <Pressable style={modalStyles.secondaryBtn} onPress={onClose}>
+              <Text style={modalStyles.secondaryBtnText}>Cancelar</Text>
+            </Pressable>
+            <Pressable style={modalStyles.primaryBtn} onPress={() => onSave(value)}>
+              <Text style={modalStyles.primaryBtnText}>Guardar</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function HistoryModal({
+  target, rows, loading, onClose,
+}: {
+  target: Equipment | null;
+  rows: { id: number; temperature: number; source: string; createdAt: string }[];
+  loading: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <Modal visible={!!target} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={modalStyles.overlay}>
+        <View style={modalStyles.card}>
+          <Text style={modalStyles.title}>Historial de {target?.id}</Text>
+          <Text style={modalStyles.subtitle}>{target?.name} · últimas {rows.length || 0} lecturas</Text>
+          {loading ? (
+            <ActivityIndicator style={{ marginVertical: 20 }} color={C.blue} />
+          ) : rows.length === 0 ? (
+            <Text style={modalStyles.empty}>Todavía no se registraron lecturas para este equipo.</Text>
+          ) : (
+            <ScrollView style={{ maxHeight: 280 }}>
+              {rows.map((row) => (
+                <View key={row.id} style={modalStyles.historyRow}>
+                  <Text style={modalStyles.historyDate}>{formatDateTime(row.createdAt)}</Text>
+                  <Text style={modalStyles.historyTemp}>{round(row.temperature)}</Text>
+                  <Text style={modalStyles.historySource}>{row.source}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+          <View style={modalStyles.actions}>
+            <Pressable style={modalStyles.primaryBtn} onPress={onClose}>
+              <Text style={modalStyles.primaryBtnText}>Cerrar</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -72,7 +163,7 @@ export function PlantScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
+      <StatusBar barStyle="dark-content" />
       <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
           <View style={styles.brandMark}><Text style={{ color: '#FFF', fontSize: 18, fontWeight: '900' }}>Ⅱ</Text></View>
@@ -120,10 +211,31 @@ export function PlantScreen() {
           autoCapitalize="none"
           returnKeyType="search"
         />
-        {vm.items.map((item) => <EquipmentCard key={item.id} item={item} onToggle={(id, enabled) => void vm.changeEnabled(id, enabled)} />)}
+        {vm.items.map((item) => (
+          <EquipmentCard
+            key={item.id}
+            item={item}
+            onToggle={(id, enabled) => void vm.changeEnabled(id, enabled)}
+            onThreshold={vm.openThreshold}
+            onHistory={(equipment) => void vm.openHistory(equipment)}
+          />
+        ))}
         {!vm.items.length && <Text style={styles.empty}>No se encontraron equipos.</Text>}
         <Text style={styles.footnote}>Entorno académico. Los equipos y comandos son simulados; la API externa aporta una referencia climática, no telemetría de una planta real.</Text>
       </ScrollView>
+
+      <ThresholdModal
+        target={vm.thresholdTarget}
+        error={vm.thresholdError}
+        onSave={(value) => void vm.saveThreshold(value)}
+        onClose={vm.closeThreshold}
+      />
+      <HistoryModal
+        target={vm.historyTarget}
+        rows={vm.historyRows}
+        loading={vm.historyLoading}
+        onClose={vm.closeHistory}
+      />
     </SafeAreaView>
   );
 }
@@ -169,4 +281,29 @@ const styles = StyleSheet.create({
   inlineButtonText: { fontSize: 11, color: C.blue, fontWeight: '800' },
   empty: { textAlign: 'center', color: C.muted, margin: 20 },
   footnote: { marginTop: 4, fontSize: 10, lineHeight: 16, color: C.muted },
+});
+
+const modalStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(10, 18, 36, 0.55)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  card: { width: '100%', maxWidth: 380, backgroundColor: '#FFF', borderRadius: 16, padding: 20, gap: 10 },
+  title: { fontSize: 17, fontWeight: '800', color: C.ink },
+  subtitle: { fontSize: 12, color: C.muted, marginBottom: 6 },
+  input: {
+    borderWidth: 1, borderColor: '#CCD9E9', borderRadius: 10, height: 46,
+    paddingHorizontal: 14, fontSize: 15, color: C.ink,
+  },
+  error: { color: C.red, fontSize: 12, fontWeight: '600' },
+  empty: { color: C.muted, fontSize: 13, textAlign: 'center', marginVertical: 20 },
+  actions: { flexDirection: 'row', gap: 10, marginTop: 8, justifyContent: 'flex-end' },
+  primaryBtn: { backgroundColor: C.blue, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 18 },
+  primaryBtnText: { color: '#FFF', fontWeight: '800', fontSize: 13 },
+  secondaryBtn: { backgroundColor: '#EAF1FB', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 18 },
+  secondaryBtnText: { color: C.navy, fontWeight: '800', fontSize: 13 },
+  historyRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#EEF2F8', gap: 8,
+  },
+  historyDate: { fontSize: 11, color: C.muted, flex: 1.3 },
+  historyTemp: { fontSize: 13, color: C.ink, fontWeight: '800', flex: 0.8, textAlign: 'right' },
+  historySource: { fontSize: 11, color: C.blue, fontWeight: '700', flex: 1, textAlign: 'right' },
 });

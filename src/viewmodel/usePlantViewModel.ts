@@ -1,8 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Accelerometer } from 'expo-sensors';
-import type { Equipment, SyncMode } from '../domain/types';
-import { findEquipment, saveEquipmentState } from '../data/localDb';
+import type { Equipment, Reading, SyncMode } from '../domain/types';
+import { findEquipment, findReadings, saveEquipmentState, updateMaxTemp } from '../data/localDb';
 import { simulateCycle, syncReference } from '../data/plantRepository';
+
+const MIN_THRESHOLD = 0;
+const MAX_THRESHOLD = 150;
+
+// Antes este mismo patrón (catch -> String(error) -> setNotice) estaba repetido
+// 4 veces en este archivo, con mensajes crudos del error mostrados tal cual al
+// usuario. Se centraliza acá: un solo lugar para decidir cómo se ve un error.
+function describeError(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return `${fallback}: ${error.message}`;
+  return fallback;
+}
 
 export function usePlantViewModel() {
   const [items, setItems] = useState<Equipment[]>([]);
@@ -12,6 +23,15 @@ export function usePlantViewModel() {
   const [mode, setMode] = useState<SyncMode>('inicial');
   const [humidity, setHumidity] = useState<number | null>(null);
   const [vibration, setVibration] = useState<number | null>(null);
+
+  // Equipo seleccionado para editar su umbral (null = diálogo cerrado)
+  const [thresholdTarget, setThresholdTarget] = useState<Equipment | null>(null);
+  const [thresholdError, setThresholdError] = useState<string | null>(null);
+
+  // Equipo seleccionado para ver su historial (null = diálogo cerrado)
+  const [historyTarget, setHistoryTarget] = useState<Equipment | null>(null);
+  const [historyRows, setHistoryRows] = useState<Reading[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const reload = useCallback(async (text: string) => {
     const rows = await findEquipment(text);
@@ -28,7 +48,7 @@ export function usePlantViewModel() {
         }
       })
       .catch((error: unknown) => {
-        if (alive) setNotice(`No se pudieron cargar equipos: ${String(error)}`);
+        if (alive) setNotice(describeError(error, 'No se pudieron cargar equipos'));
       });
     return () => {
       alive = false;
@@ -61,7 +81,7 @@ export function usePlantViewModel() {
       await reload(text);
       setNotice('Listado actualizado.');
     } catch (error) {
-      setNotice(`Error al filtrar: ${String(error)}`);
+      setNotice(describeError(error, 'Error al filtrar'));
     }
   };
 
@@ -73,7 +93,7 @@ export function usePlantViewModel() {
       await saveEquipmentState(id, enabled);
       setNotice(`Comando local aplicado a ${id}.`);
     } catch (error) {
-      setNotice(`Error al guardar el estado: ${String(error)}`);
+      setNotice(describeError(error, 'Error al guardar el estado'));
     }
   };
 
@@ -87,7 +107,7 @@ export function usePlantViewModel() {
       setMode('simulado');
       setNotice('Lecturas simuladas registradas en SQLite.');
     } catch (error) {
-      setNotice(`No se pudo simular: ${String(error)}`);
+      setNotice(describeError(error, 'No se pudo simular'));
     } finally {
       setLoading(false);
     }
@@ -110,14 +130,67 @@ export function usePlantViewModel() {
       try {
         await reload(filter);
       } catch (error) {
-        setNotice(`No se pudo actualizar la vista: ${String(error)}`);
+        setNotice(describeError(error, 'No se pudo actualizar la vista'));
       }
       setLoading(false);
     }
   };
 
+  // --- Umbral editable (Actividad 1) ---
+
+  const openThreshold = (equipment: Equipment) => {
+    setThresholdError(null);
+    setThresholdTarget(equipment);
+  };
+
+  const closeThreshold = () => {
+    setThresholdTarget(null);
+    setThresholdError(null);
+  };
+
+  const saveThreshold = async (rawValue: string) => {
+    if (!thresholdTarget) return;
+    const normalized = rawValue.trim().replace(',', '.');
+    const value = Number(normalized);
+    if (!normalized || Number.isNaN(value) || value <= MIN_THRESHOLD || value > MAX_THRESHOLD) {
+      setThresholdError(`Ingresá un número mayor que ${MIN_THRESHOLD} y menor o igual a ${MAX_THRESHOLD}.`);
+      return;
+    }
+    try {
+      await updateMaxTemp(thresholdTarget.id, value);
+      await reload(filter);
+      setNotice(`Límite de ${thresholdTarget.id} actualizado a ${value.toFixed(1)} °C.`);
+      closeThreshold();
+    } catch (error) {
+      setThresholdError(describeError(error, 'No se pudo guardar el nuevo límite'));
+    }
+  };
+
+  // --- Historial de lecturas (Actividad 2) ---
+
+  const openHistory = async (equipment: Equipment) => {
+    setHistoryTarget(equipment);
+    setHistoryLoading(true);
+    try {
+      const rows = await findReadings(equipment.id, 10);
+      setHistoryRows(rows);
+    } catch (error) {
+      setNotice(describeError(error, 'No se pudo cargar el historial'));
+      setHistoryRows([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const closeHistory = () => {
+    setHistoryTarget(null);
+    setHistoryRows([]);
+  };
+
   return {
     items, filter, loading, notice, mode, humidity, vibration,
     search, changeEnabled, simulate, sync,
+    thresholdTarget, thresholdError, openThreshold, closeThreshold, saveThreshold,
+    historyTarget, historyRows, historyLoading, openHistory, closeHistory,
   };
 }

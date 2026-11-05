@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import type { Equipment } from '../domain/types';
+import type { Equipment, Reading } from '../domain/types';
 
 type EquipmentRow = {
   id: string;
@@ -9,6 +9,14 @@ type EquipmentRow = {
   temperature: number;
   max_temp: number;
   updated_at: string;
+};
+
+type ReadingRow = {
+  id: number;
+  equipment_id: string;
+  temperature: number;
+  source: string;
+  created_at: string;
 };
 
 let connection: Promise<SQLite.SQLiteDatabase> | null = null;
@@ -70,18 +78,48 @@ function toEquipment(row: EquipmentRow): Equipment {
 
 export async function findEquipment(filter: string): Promise<Equipment[]> {
   const db = await openPlantDatabase();
-  const clause = filter.trim()
-    ? `WHERE name LIKE '%${filter.trim()}%' OR id LIKE '%${filter.trim()}%'`
-    : '';
-  const rows = await db.getAllAsync<EquipmentRow>(
-    `SELECT * FROM equipment ${clause} ORDER BY id ASC`
-  );
+  const text = filter.trim();
+  const rows = text
+    ? await db.getAllAsync<EquipmentRow>(
+        'SELECT * FROM equipment WHERE name LIKE ? OR id LIKE ? ORDER BY id ASC',
+        [`%${text}%`, `%${text}%`]
+      )
+    : await db.getAllAsync<EquipmentRow>('SELECT * FROM equipment ORDER BY id ASC');
   return rows.map(toEquipment);
 }
 
 export async function saveEquipmentState(id: string, enabled: boolean): Promise<void> {
   const db = await openPlantDatabase();
   await db.runAsync('UPDATE equipment SET enabled = ? WHERE id = ?', enabled ? 1 : 0, id);
+}
+
+export async function updateMaxTemp(id: string, maxTemp: number): Promise<void> {
+  const db = await openPlantDatabase();
+  await db.runAsync(
+    'UPDATE equipment SET max_temp = ?, updated_at = ? WHERE id = ?',
+    maxTemp,
+    new Date().toISOString(),
+    id
+  );
+}
+
+function toReading(row: ReadingRow): Reading {
+  return {
+    id: row.id,
+    equipmentId: row.equipment_id,
+    temperature: row.temperature,
+    source: row.source,
+    createdAt: row.created_at,
+  };
+}
+
+export async function findReadings(equipmentId: string, limit = 10): Promise<Reading[]> {
+  const db = await openPlantDatabase();
+  const rows = await db.getAllAsync<ReadingRow>(
+    'SELECT * FROM readings WHERE equipment_id = ? ORDER BY id DESC LIMIT ?',
+    [equipmentId, limit]
+  );
+  return rows.map(toReading);
 }
 
 export async function recordReading(
